@@ -344,7 +344,7 @@ def install_boinc_files(dest_dir, install_web_files, install_server_files):
         install_glob(srcdir('html/languages/translations/*.po'), dest('html/languages/translations/'))
 
     # copy Python stuff
-    install(srcdir('sched/start' ), dest('bin/start' ))
+    install(builddir('sched/start' ), dest('bin/start' ))
     force_symlink(dest('bin', 'start'), dest('bin', 'stop'))
     force_symlink(dest('bin', 'start'), dest('bin', 'status'))
     python_files = [
@@ -402,7 +402,7 @@ sys.path.insert(0, os.path.join('{dest_dir}', 'py'))
             'file_deleter',
             'get_file',
             'make_work',
-            'pshelper',
+            #'pshelper',
             'put_file',
             'pymw_assimilator.py',
             'sample_assimilator',
@@ -426,6 +426,7 @@ sys.path.insert(0, os.path.join('{dest_dir}', 'py'))
         ]
     for f in command:
         install(builddir('sched/' + f), dest('bin',f))
+    install(srcdir('sched/pshelper'), dest('bin','pshelper'))
     command = [ 'vda', 'vdad' ]
     for f in command:
         install(builddir('vda/' + f), dest('bin',f))
@@ -433,6 +434,8 @@ sys.path.insert(0, os.path.join('{dest_dir}', 'py'))
             'appmgr',
             'boinc_submit',
             'cancel_jobs',
+            'create_apps',
+            'create_user_submit',
             'create_work',
             'dbcheck_files_exist',
             'dir_hier_move',
@@ -454,8 +457,8 @@ sys.path.insert(0, os.path.join('{dest_dir}', 'py'))
         ]
     for f in command:
         install(builddir('tools/' + f), dest('bin',f))
-    install(srcdir('lib/crypt_prog'), dest('bin','crypt_prog'))
-    install(srcdir('sched/db_dump_spec.xml' ), dest('','db_dump_spec.xml' ))
+    install(builddir('lib/crypt_prog'), dest('bin','crypt_prog'))
+    install(builddir('sched/db_dump_spec.xml' ), dest('','db_dump_spec.xml' ))
 
 class Project:
     def __init__(self,
@@ -557,7 +560,8 @@ class Project:
     # create new project.  Called only from make_project
     def install_project(self):
         if os.path.exists(self.dest()):
-            raise SystemExit('Project directory "%s" already exists; this would clobber it!'%self.dest())
+            if len(os.listdir(self.dest())): # if directory not empty
+                raise SystemExit('Project directory "%s" already exists; this would clobber it!'%self.dest())
 
         verbose_echo(1, "Creating directories")
 
@@ -591,8 +595,8 @@ class Project:
             self.dest('html/project/project_specific_prefs.inc'))
         install(srcdir('html/project.sample/cache_parameters.inc'),
             self.dest('html/project/cache_parameters.inc'))
-        install(srcdir('tools/project.xml'), self.dest('project.xml'))
-        install(srcdir('tools/gui_urls.xml'), self.dest('gui_urls.xml'))
+        install(builddir('tools/project.xml'), self.dest('project.xml'))
+        install(builddir('tools/gui_urls.xml'), self.dest('gui_urls.xml'))
         if not self.production:
             install(srcdir('test/uc_result'), self.dest('templates/uc_result'))
             install(srcdir('test/uc_wu_nodelete'), self.dest('templates/uc_wu'))

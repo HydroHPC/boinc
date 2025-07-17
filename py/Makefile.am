@@ -19,7 +19,7 @@ EXTRA_DIST = db_def_to_py \
 	Boinc/tools.py \
 	Boinc/util.py
 
-pydir=$(prefix)/usr/share/boinc-server-maker/py/Boinc
+pydir=$(prefix)/share/boinc-server-maker/py/Boinc
 py_SCRIPTS=$(EXTRA_DIST)
 
 
@@ -29,10 +29,10 @@ $(srcdir)/Boinc/boinc_db.py: $(top_srcdir)/db/boinc_db.h $(top_srcdir)/db/boinc_
 # all: $(srcdir)/Boinc/boinc_db.py
 
 all-local:
-	python setup.py build --build-base=$(top_builddir)/py
+	python -m build
 
 install-exec-local:
-	python setup.py install --prefix=$(prefix) --root=$(DESTDIR)
+	python -m pip install . --prefix=$(prefix) --root=$(DESTDIR)
 
 clean:
 	rm -rf $(top_builddir)/py/lib.*

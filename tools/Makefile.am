@@ -16,6 +16,8 @@ toolbin_PROGRAMS = \
 
 dist_toolbin_SCRIPTS = \
 	    boinc_submit \
+	    create_apps \
+	    create_user_submit \
 		dbcheck_files_exist \
 		grep_logs \
 		make_project \

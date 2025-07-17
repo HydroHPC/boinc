@@ -17,6 +17,7 @@
 // along with BOINC.  If not, see <http://www.gnu.org/licenses/>.
 
 require_once("../inc/db.inc");
+require_once("../inc/util.inc");
 
 // represents a connection to a database.
 // Intended to be subclassed (e.g., BoincDb, BossaDb)
