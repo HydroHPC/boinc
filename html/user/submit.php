@@ -53,7 +53,84 @@ display_errors();
 define("PAGE_SIZE", 20);
 
 function return_link() {
-    echo "<p><a href=submit.php?action=status>Return to batches page</a>\n";
+    echo "<p><a href=submit.php?action=show_user_batches>Return to batches page</a>\n";
+}
+
+// return subset of batches in given state
+//
+function batches_in_state($all_batches, $state) {
+    $batches = [];
+    foreach ($all_batches as $batch) {
+        if ($batch->state != $state) continue;
+        $batches[] = $batch;
+    }
+    return $batches;
+}
+
+function sort_batches(&$batches, $order) {
+    switch ($order) {
+    case 'sub_asc':
+        $f = function($a, $b) {
+            return (int)($a->create_time - $b->create_time);
+        };
+        break;
+    case 'sub_desc':
+        $f = function($a, $b) {
+            return (int)($b->create_time - $a->create_time);
+        };
+        break;
+    case 'comp_asc':
+        $f = function($a, $b) {
+            return (int)($a->completion_time - $b->completion_time);
+        };
+        break;
+    case 'comp_desc':
+        $f = function($a, $b) {
+            return (int)($b->completion_time - $a->completion_time);
+        };
+        break;
+    }
+    usort($batches, $f);
+}
+
+// in progress batches don't have completion time
+//
+function in_progress_order($order) {
+    switch ($order) {
+    case 'comp_asc': return 'sub_asc';
+    case 'comp_desc': return 'sub_desc';
+    }
+    return $order;
+}
+
+// show order options
+// sub_asc, sub_desc: submission time ( = ID order)
+// comp_asc, comp_desc: completion time
+
+function order_options($url_args, $order) {
+    $url = "submit.php?$url_args";
+    echo sprintf(
+        'Order by: submission time (%s, %s) or completion time (%s, %s)',
+        order_item($url, $order, 'sub_asc', 'ascending'),
+        order_item($url, $order, 'sub_desc', 'descending'),
+        order_item($url, $order, 'comp_asc', 'ascending'),
+        order_item($url, $order, 'comp_desc', 'descending')
+    );
+}
+
+function order_item($url, $cur_order, $order, $label) {
+    if ($cur_order == $order) {
+        return $label;
+    } else {
+        $url .= "&order=$order";
+        return "<a href=$url>$label</a>";
+    }
+}
+
+function get_order() {
+    $order = get_str('order', true);
+    if (!$order) $order = 'sub_desc';
+    return $order;
 }
 
 // get params of in-progress batches; they might not be in progress anymore.
@@ -82,7 +159,7 @@ function state_count($batches, $state) {
     return $n;
 }
 
-function show_all_link($batches, $state, $limit, $user, $app) {
+function show_all_batches_link($batches, $state, $limit, $user, $app) {
     $n = state_count($batches, $state);
     if ($n > $limit) {
         if ($user) $userid = $user->id;
@@ -91,7 +168,7 @@ function show_all_link($batches, $state, $limit, $user, $app) {
         else $appid = 0;
 
         echo "Showing the most recent $limit of $n batches.
-            <a href=submit.php?action=show_all&state=$state&userid=$userid&appid=$appid>Show all $n</a>
+            <a href=submit.php?action=show_all_batches&state=$state&userid=$userid&appid=$appid>Show all $n</a>
             <p>
         ";
     }
@@ -99,18 +176,19 @@ function show_all_link($batches, $state, $limit, $user, $app) {
 
 // show in-progress batches.
 //
-function show_in_progress($batches, $limit, $user, $app) {
-    echo "<h3>Batches in progress</h3>\n";
+function show_in_progress($all_batches, $order, $limit, $user, $app) {
+    $batches = batches_in_state($all_batches, BATCH_STATE_IN_PROGRESS);
+    sort_batches($batches, in_progress_order($order));
+    echo sprintf('<h3>Batches in progress (%d)</h3>', count($batches));
     $first = true;
     $n = 0;
     foreach ($batches as $batch) {
-        if ($batch->state != BATCH_STATE_IN_PROGRESS) continue;
         if ($limit && $n == $limit) break;
         $n++;
         if ($first) {
             $first = false;
             if ($limit) {
-                show_all_link(
+                show_all_batches_link(
                     $batches, BATCH_STATE_IN_PROGRESS, $limit, $user, $app
                 );
             }
@@ -124,8 +202,7 @@ function show_in_progress($batches, $limit, $user, $app) {
                 "App",
                 "# jobs",
                 "Progress",
-                "Submitted",
-                //"Logical end time<br><small>Determines priority</small>"
+                "Submitted"
             ];
             row_heading_array($x);
         }
@@ -137,8 +214,7 @@ function show_in_progress($batches, $limit, $user, $app) {
             $batch->app_name,
             $batch->njobs,
             "$pct_done%",
-            local_time_str($batch->create_time),
-            //local_time_str($batch->logical_end_time)
+            local_time_str($batch->create_time)
         ];
         row_array($x);
     }
@@ -150,24 +226,25 @@ function show_in_progress($batches, $limit, $user, $app) {
     }
 }
 
-function show_complete($batches, $limit, $user, $app) {
+function show_complete($all_batches, $order, $limit, $user, $app) {
+    $batches = batches_in_state($all_batches, BATCH_STATE_COMPLETE);
+    sort_batches($batches, $order);
+    echo sprintf('<h3>Completed batches (%d)</h3>', count($batches));
     $first = true;
     $n = 0;
-    echo "<h3>Completed batches</h3>\n";
     foreach ($batches as $batch) {
-        if ($batch->state != BATCH_STATE_COMPLETE) continue;
         if ($limit && $n == $limit) break;
         $n++;
         if ($first) {
             $first = false;
             if ($limit) {
-                show_all_link($batches, BATCH_STATE_COMPLETE, $limit, $user, $app);
+                show_all_batches_link($batches, BATCH_STATE_COMPLETE, $limit, $user, $app);
             }
             form_start('submit.php', 'get');
             form_input_hidden('action', 'retire_multi');
             start_table('table-striped');
             table_header(
-                "Name", "ID", "User", "App", "# Jobs", "Submitted", "Select"
+                "Name", "ID", "User", "App", "# Jobs", "Submitted", "Completed", "Select"
             );
         }
         table_row(
@@ -177,6 +254,7 @@ function show_complete($batches, $limit, $user, $app) {
             $batch->app_name,
             $batch->njobs,
             local_time_str($batch->create_time),
+            local_time_str($batch->completion_time),
             sprintf('<input type=checkbox name=retire_%d>', $batch->id)
         );
     }
@@ -189,22 +267,25 @@ function show_complete($batches, $limit, $user, $app) {
     }
 }
 
-function show_aborted($batches, $limit, $user, $app) {
+function show_aborted($all_batches, $order, $limit, $user, $app) {
+    $batches = batches_in_state($all_batches, BATCH_STATE_ABORTED);
+    if (!$batches) return;
+    sort_batches($batches, $order);
+    echo sprintf('<h3>Aborted batches (%d)</h3>', count($batches));
     $first = true;
     $n = 0;
     foreach ($batches as $batch) {
-        if ($batch->state != BATCH_STATE_ABORTED) continue;
         if ($limit && $n == $limit) break;
         $n++;
         if ($first) {
             $first = false;
-            echo "<h2>Aborted batches</h2>\n";
             if ($limit) {
-                show_all_link($batches, BATCH_STATE_ABORTED, $limit, $user, $app);
+                show_all_batches_link($batches, BATCH_STATE_ABORTED, $limit, $user, $app);
             }
-            form_start('');
+            form_start('submit.php', 'get');
+            form_input_hidden('action', 'retire_multi');
             start_table();
-            table_header("name", "ID", "user", "app", "# jobs", "submitted");
+            table_header("Name", "ID", "User", "App", "# Jobs", "Submitted", "Aborted", 'Select');
         }
         table_row(
             "<a href=submit.php?action=query_batch&batch_id=$batch->id>$batch->name</a>",
@@ -212,11 +293,14 @@ function show_aborted($batches, $limit, $user, $app) {
             $batch->user_name,
             $batch->app_name,
             $batch->njobs,
-            local_time_str($batch->create_time)
+            local_time_str($batch->create_time),
+            local_time_str($batch->completion_time),
+            sprintf('<input type=checkbox name=retire_%d>', $batch->id)
         );
     }
     if (!$first) {
         end_table();
+        form_submit('Retire selected batches');
         form_end();
     }
 }
@@ -251,19 +335,19 @@ function fill_in_app_and_user_names(&$batches) {
     }
 }
 
-// show a set of batches
+// show a set of batches: in progress, then completed, then aborted
 //
-function show_batches($batches, $limit, $user, $app) {
+function show_batches($batches, $order, $limit, $user, $app) {
     fill_in_app_and_user_names($batches);
     $batches = get_batches_params($batches);
-    show_in_progress($batches, $limit, $user, $app);
-    show_complete($batches, $limit, $user, $app);
-    show_aborted($batches, $limit, $user, $app);
+    show_in_progress($batches, $order, $limit, $user, $app);
+    show_complete($batches, $order, $limit, $user, $app);
+    show_aborted($batches, $order, $limit, $user, $app);
 }
 
 // show links to per-app job submission forms
 //
-function handle_main($user) {
+function show_submit_links($user) {
     global $remote_apps;
     $user_submit = BoincUserSubmit::lookup_userid($user->id);
     if (!$user_submit) {
@@ -314,11 +398,13 @@ function handle_main($user) {
 // show batches of logged in user.
 // They have manage access to these batches.
 //
-function handle_show_status($user) {
+function handle_show_user_batches($user) {
     page_head("Batches");
-    $batches = BoincBatch::enum("user_id = $user->id order by id desc");
+    $order = get_order();
+    order_options('action=show_user_batches', $order);
+    $batches = BoincBatch::enum("user_id = $user->id");
     get_batches_params($batches);
-    show_batches($batches, PAGE_SIZE, $user, null);
+    show_batches($batches, $order, PAGE_SIZE, $user, null);
 
     page_tail();
 }
@@ -360,7 +446,7 @@ function handle_admin($user) {
             echo "
                 <li>$app->user_friendly_name<br>
                 <ul>
-                <li><a href=submit.php?action=admin_app&app_id=$app->id>View/manage batches</a>
+                <li><a href=submit.php?action=show_batches_admin_app&app_id=$app->id>View/manage batches</a>
             ";
             if ($app_name == 'buda') {
                 echo "
@@ -383,7 +469,7 @@ function handle_admin($user) {
         foreach ($usas as $usa) {
             $app = BoincApp::lookup_id($usa->app_id);
             echo "<li>$app->user_friendly_name<br>
-                <a href=submit.php?action=admin_app&app_id=$app->id>Batches</a>
+                <a href=submit.php?action=show_batches_admin_app&app_id=$app->id>Batches</a>
             ";
             if ($usa->manage) {
                 echo "&middot;
@@ -396,7 +482,9 @@ function handle_admin($user) {
     page_tail();
 }
 
-function handle_admin_app($user) {
+// show all batches for given app to administrator
+//
+function show_batches_admin_app($user) {
     $app_id = get_int("app_id");
     $app = BoincApp::lookup_id($app_id);
     if (!$app) error_page("no such app");
@@ -404,16 +492,21 @@ function handle_admin_app($user) {
         error_page('no access');
     }
 
+    $order = get_order();
+
     page_head("Manage batches for $app->user_friendly_name");
-    $batches = BoincBatch::enum("app_id = $app_id order by id desc");
-    show_batches($batches, PAGE_SIZE, null, $app);
+    order_options("action=show_batches_admin_app&app_id=$app_id", $order);
+    $batches = BoincBatch::enum("app_id = $app_id");
+    show_batches($batches, $order, PAGE_SIZE, null, $app);
     page_tail();
 }
 
 function handle_admin_all($user) {
+    $order = get_order();
     page_head("Administer batches (all apps)");
-    $batches = BoincBatch::enum("true order by id desc");
-    show_batches($batches, PAGE_SIZE, null, null);
+    order_options("action=admin_all", $order);
+    $batches = BoincBatch::enum('');
+    show_batches($batches, $order, PAGE_SIZE, null, null);
     page_tail();
 }
 
@@ -598,24 +691,43 @@ function handle_query_batch($user) {
         );
         break;
     }
-    echo "<p>";
-    show_button("submit.php?action=batch_stats&batch_id=$batch_id",
-        "Show memory/disk usage statistics"
-    );
+    echo "<p>
+        <h3>Completed jobs</h3>
+        <ul>
+        <li>
+        <a href=submit_stats.php?action=flops_graph&batch_id=$batch_id>Job runtimes</a>
+        <li>
+        <a href=submit.php?action=batch_stats&batch_id=$batch_id>Memory/disk usage</a>
+        <li>
+        <a href=submit_stats.php?action=show_hosts&batch_id=$batch_id>Grouped by host</a>
+        </ul>
+        <h3>Failed jobs</h3>
+        <ul>
+        <li>
+        <a href=submit_stats.php?action=err_host&batch_id=$batch_id>Grouped by host</a>
+        <li>
+        <a href=submit_stats.php?action=err_code&batch_id=$batch_id>Grouped by exit code</a>
+        </ul>
+    ";
 
     echo "<h2>Jobs</h2>\n";
     start_table();
     $x = [
         "Name <br><small>click for details</small>",
-        "status"
+        "status",
+        "GFLOPS-hours"
     ];
     row_heading_array($x);
     foreach($wus as $wu) {
         $y = '';
+        $c = '---';
         switch($wu->status) {
         case WU_SUCCESS:
             $resultid = $wu->canonical_resultid;
             $y = sprintf('<font color="%s">completed</font>', COLOR_SUCCESS);
+            $c = number_format(
+                credit_to_gflop_hours($wu->canonical_credit), 2
+            );
             break;
         case WU_ERROR:
             $y = sprintf('<font color="%s">failed</font>', COLOR_FAIL);
@@ -630,6 +742,7 @@ function handle_query_batch($user) {
         $x = [
             "<a href=submit.php?action=query_job&wuid=$wu->id>$wu->name</a>",
             $y,
+            $c
         ];
         row_array($x);
     }
@@ -859,35 +972,41 @@ function handle_retire_multi($user) {
 
 // given a list of batches, show the ones in a given state
 //
-function show_batches_in_state($batches, $state) {
+function show_batches_in_state($batches, $state, $url_args, $order) {
     switch ($state) {
     case BATCH_STATE_IN_PROGRESS:
         page_head("Batches in progress");
-        show_in_progress($batches, 0, null, null);
+        order_options($url_args, $order);
+        show_in_progress($batches, $order, 0, null, null);
         break;
     case BATCH_STATE_COMPLETE:
         page_head("Completed batches");
-        show_complete($batches, 0, null, null);
+        order_options($url_args, $order);
+        show_complete($batches, $order, 0, null, null);
         break;
     case BATCH_STATE_ABORTED:
         page_head("Aborted batches");
-        show_aborted($batches, 0, null, null);
+        order_options($url_args, $order);
+        show_aborted($batches, $order, 0, null, null);
         break;
     }
     page_tail();
 }
 
-function handle_show_all($user) {
+// show all batches visible to user, possibly limited by user/app/state
+function handle_show_all_batches($user) {
     $userid = get_int("userid");
     $appid = get_int("appid");
     $state = get_int("state");
+    $order = get_order();
+    $url_args = "action=show_all_batches&state=$state&userid=$userid&appid=$appid";
     if ($userid) {
         // user looking at their own batches
         //
         if ($userid != $user->id) error_page("wrong user");
-        $batches = BoincBatch::enum("user_id = $user->id and state=$state order by id desc");
+        $batches = BoincBatch::enum("user_id=$user->id and state=$state");
         fill_in_app_and_user_names($batches);
-        show_batches_in_state($batches, $state);
+        show_batches_in_state($batches, $state, $url_args, $order);
     } else {
         // admin looking at batches
         //
@@ -897,12 +1016,12 @@ function handle_show_all($user) {
         if ($appid) {
             $app = BoincApp::lookup_id($appid);
             if (!$app) error_page("no such app");
-            $batches = BoincBatch::enum("app_id = $appid and state=$state order by id desc");
+            $batches = BoincBatch::enum("app_id=$appid and state=$state");
         } else {
-            $batches = BoincBatch::enum("state=$state order by id desc");
+            $batches = BoincBatch::enum("state=$state");
         }
         fill_in_app_and_user_names($batches);
-        show_batches_in_state($batches, $state);
+        show_batches_in_state($batches, $state, $url_args, $order);
     }
 }
 
@@ -911,19 +1030,32 @@ $user = get_logged_in_user();
 $action = get_str('action', true);
 
 switch ($action) {
-case '': handle_main($user); break;
-case 'abort_batch': handle_abort_batch($user); break;
-case 'admin': handle_admin($user); break;
-case 'admin_app': handle_admin_app($user); break;
+
+// links to job submission forms
+case '': show_submit_links($user); break;
+
+// show lists of batches
+case 'show_all_batches': handle_show_all_batches($user); break;
+case 'show_user_batches': handle_show_user_batches($user); break;
+case 'show_batches_admin_app': show_batches_admin_app($user); break;
 case 'admin_all': handle_admin_all($user); break;
+
+// show info about a batch or job
 case 'batch_stats': handle_batch_stats($user); break;
 case 'query_batch': handle_query_batch($user); break;
 case 'query_job': handle_query_job($user); break;
+
+// operations on batches
 case 'retire_batch': handle_retire_batch($user); break;
 case 'retire_multi': handle_retire_multi($user); break;
-case 'show_all': handle_show_all($user); break;
-case 'status': handle_show_status($user); break;
+case 'abort_batch': handle_abort_batch($user); break;
+
+// access control
+case 'admin': handle_admin($user); break;
+
+// 'run jobs only on my computers' flag (stored in user.seti_id)
 case 'update_only_own': handle_update_only_own($user); break;
+
 default:
     error_page("no such action $action");
 }

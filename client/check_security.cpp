@@ -242,7 +242,15 @@ int use_sandbox, int isManager, char* path_to_error, int len
         // Require absolute owner and group boinc_master:boinc_master
         // Get the full path to BOINC Client inside this application's bundle
         //
-        retval = stat("/Applications/BOINCManager.app/Contents/Resources/boinc", &sbuf);
+    long brandId = 0;
+    FILE *f = fopen("/Library/Application Support/BOINC Data/Branding", "r");
+    if (f) {
+        fscanf(f, "BrandId=%ld\n", &brandId);
+        fclose(f);
+    }
+
+    snprintf(full_path, sizeof(full_path),"/%s/Contents/Resources/boinc", appPath[brandId]);
+        retval = stat(full_path, &sbuf);
         if (retval)
             return -1016;          // Should never happen
 
@@ -375,7 +383,9 @@ int use_sandbox, int isManager, char* path_to_error, int len
             return retval;
     }
 
-    snprintf(full_path, sizeof(full_path), "%s/%s", dir_path, PODMAN_DIR);
+    // "BOINC Podman" Directory is in "/Library/Application/Support/"
+    // directory, alongside "BOINC Data" directory
+    snprintf(full_path, sizeof(full_path), "%s/../%s", dir_path, PODMAN_DIR);
     retval = stat(full_path, &sbuf);
     if (! retval) {                 // Client can create podman directory if it does not yet exist.
        if (use_sandbox) {
@@ -389,11 +399,12 @@ int use_sandbox, int isManager, char* path_to_error, int len
         if (sbuf.st_uid != boinc_master_uid)
             return -1073;
 
-        // Step through slot directories
-        retval = CheckNestedDirectories(full_path, 1, use_sandbox, isManager, false, path_to_error, len);
-        if (retval)
-            return retval;
+        // We must not modify permissions of any of Podman's data, or
+        // change ownership of any of Podman's data from boinc_project,
+        // so we set them for the BOINC podman directory itself but not
+        // its contents.
     }
+//TODO: Should we confirm owner of all BOINC podman directory's contents is boinc_project?
 
     snprintf(full_path, sizeof(full_path),
         "%s/%s", dir_path, GUI_RPC_PASSWD_FILE

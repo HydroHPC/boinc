@@ -26,7 +26,7 @@
 // --dockerfile         Dockerfile name, default Dockerfile
 // --sporadic           app is sporadic
 //
-// args are passed as cmdline args to main prog in container
+// additional args are passed as cmdline args to main prog in container
 //
 // docker_wrapper runs in a directory (usually slot dir) containing
 //
@@ -83,6 +83,10 @@
 // enable standalone test on Win
 //
 //#define WIN_STANDALONE_TEST
+
+// docs:
+// https://docs.docker.com/reference/cli/docker/container/run/
+// https://docs.docker.com/engine/containers/resource_constraints/
 
 #include <cstdio>
 #include <string>
@@ -424,6 +428,13 @@ int create_container() {
         strcat(cmd, buf);
     }
 
+    // multithread
+    //
+    if (aid.ncpus > 1) {
+        snprintf(buf, sizeof(buf), " --cpus %f", aid.ncpus);
+        strcat(cmd, buf);
+    }
+
     // GPU access
     //
     if (config.use_gpu) {
@@ -489,8 +500,8 @@ int container_op(const char *op) {
 }
 
 // Clean up at end of job.
-// Show log output.
-// remove container and image
+// Copy log output to stderr.
+// Remove container and image
 //
 void cleanup() {
     char cmd[1024];
@@ -593,13 +604,25 @@ int get_stats(RSC_USAGE &ru) {
     retval = docker_conn.command(cmd, out);
     if (retval) return -1;
     if (out.empty()) return -1;
-    const char *buf = out[0].c_str();
+
     // output is like
     // 0.00% 420KiB / 503.8GiB
-    double cpu_pct, mem;
-    char mem_unit;
-    n = sscanf(buf, "%lf%% %lf%c", &cpu_pct, &mem, &mem_unit);
-    if (n != 3) return -1;
+    // but this can be preceded by lines with warning messages
+    //
+    bool found = false;
+    double cpu_pct=0, mem=0;
+    char mem_unit=0;
+    for (const string& line: out) {
+        n = sscanf(line.c_str(), "%lf%% %lf%c", &cpu_pct, &mem, &mem_unit);
+        if (n == 3) {
+            found = true;
+            break;
+        }
+    }
+    if (!found) {
+        fprintf(stderr, "Can't parse stats reply\n");
+        return -1;
+    }
     switch (mem_unit) {
     case 'G':
     case 'g':
@@ -651,9 +674,27 @@ int wsl_init() {
         distro_name = distro->distro_name;
         docker_type = distro->docker_type;
     }
+    fprintf(stderr, "Using WSL distro %s\n", distro_name.c_str());
     return docker_conn.init(docker_type, distro_name, config.verbose>0);
 }
 #endif
+
+// checkpoint/restore
+// podman: https://podman.io/docs/checkpoint
+//      podman container checkpoint <name>
+//      podman container restore <name>
+// docker: https://docs.docker.com/reference/cli/docker/checkpoint/
+//      docker checkpoint create <cont_name> <checkpoint_name>
+//      docker checkpoint ls   (lists checkpoints)
+//      docker checkpoint rm   (delete checkpoint)
+//      docker start --checkpoint <checkpoint_name> <cont_name>
+//      (use <cont_name>_checkpoint as the checkpoint name)
+//      need --security-opt=seccomp:unconfined in initial run command?
+//
+// when we checkpoint, write a file with
+//      WSL distro name
+//      docker type
+// ... in case we somehow change WSL distro or docker type
 
 int main(int argc, char** argv) {
     BOINC_OPTIONS options;
@@ -723,7 +764,18 @@ int main(int argc, char** argv) {
         boinc_finish(1);
     }
 #else
-    docker_type = boinc_is_standalone()?PODMAN:aid.host_info.docker_type;
+    if (boinc_is_standalone()) {
+        docker_type = PODMAN;
+    } else {
+        if (!strlen(aid.host_info.docker_version)
+            || aid.host_info.docker_type == NONE
+        ) {
+            fprintf(stderr, "Docker type missing from app_init_data.xml\n");
+            fprintf(stderr, "Check project plan class configuration\n");
+            boinc_finish(1);
+        }
+        docker_type = aid.host_info.docker_type;
+    }
     docker_conn.init(docker_type, config.verbose>0);
 #endif
     fprintf(stderr, "Using %s\n", docker_type_str(docker_type));
