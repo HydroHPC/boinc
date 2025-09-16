@@ -1,0 +1,23 @@
+#!/bin/bash
+
+
+ALLOW_UNSIGNED=false  # default value
+
+# Parse args
+for ARG in "$@"; do
+    case "$ARG" in
+        --allow_unsigned)
+            ALLOW_UNSIGNED=true
+            ;;
+    esac
+done
+
+cd /boinc_project_root
+./bin/create_apps
+
+
+if [ "$ALLOW_UNSIGNED" = true ]; then
+    yes | ./bin/update_versions
+else
+    ./bin/update_versions
+fi

@@ -1,0 +1,13 @@
+#!/bin/bash
+
+
+EMAIL=$1
+USERNAME=$2
+PASSWORD=$3
+echo "Setting up user $USERNAME"
+if test -z "$PASSWORD"; then
+    echo "Generate random password, this user will not be able to connect"
+    PASSWORD=$(openssl rand -base64 16)
+fi
+cd /boinc_project_root/html/inc
+php -r "include_once('../inc/user_util.inc'); make_user('$EMAIL','$USERNAME','$PASSWORD');"

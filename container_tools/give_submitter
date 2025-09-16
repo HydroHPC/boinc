@@ -1,0 +1,8 @@
+#!/bin/bash
+
+
+SUBMIT_USER=$1
+mkdir -p /boinc_project_secrets/submitter/
+touch /boinc_project_secrets/submitter/$SUBMIT_USER.txt
+cd /boinc_project_root
+./bin/create_user_submit $@

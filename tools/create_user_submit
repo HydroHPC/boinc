@@ -8,9 +8,21 @@ from Boinc.db_base import get_dbconnection
 from Boinc.configxml import ConfigFile
 import argparse
 
+def check_user_submit_exist(user_id):
+    req = f"SELECT user_id FROM user_submit;"
+    cursor.execute(req)
+    res = cursor.fetchall()
+    if len(res):
+        return user_id in res[0].values()
+    else:
+        return False
+
+
 parser = argparse.ArgumentParser()
 parser.add_argument("user", help="User to grant submit right",
                     type=str)
+parser.add_argument("-r", "--remove", help="Remove submit right",
+                    action='store_true')
 parser.add_argument("--quota", help="User priority when resources are scarse (default 100)",
                     default=100, type=int)
 parser.add_argument("--max_jobs", help="Max number of concurrent running jobs for this user",
@@ -31,11 +43,30 @@ cursor.execute(f"select id,authenticator from user where name=\"{args.user}\"")
 res = cursor.fetchall()[0]
 user_id, auth = res['id'], res['authenticator']
 
-# grant user submit
-req = f"INSERT INTO user_submit VALUES ({user_id},{args.quota},0,1,1,{args.max_jobs});"
-cursor.execute(req)
-dbcon.commit()
-cursor.close()
 
-# return authenticator
-print(auth)
+if args.remove:
+    if not check_user_submit_exist(user_id):
+        print(f"User \"{args.user}\" not found in submit_user")
+        exit(1)
+    # delete user
+    req = f"DELETE FROM user_submit WHERE user_id={user_id};"
+    cursor.execute(req)
+    dbcon.commit()
+    cursor.close()
+    print(f"User \"{args.user}\" successfully removed from submit_user")
+else:
+    # check if user have submit right
+    if check_user_submit_exist(user_id):
+        print(f"User \"{args.user}\" already in submit_user")
+        exit(1)
+    # grant user submit
+    req = f"INSERT INTO user_submit VALUES ({user_id},{args.quota},0,1,1,{args.max_jobs});"
+    cursor.execute(req)
+    dbcon.commit()
+    cursor.close()
+    # return authenticator
+    print(f"User \"{args.user}\" successfully added to user_submit, authenticator:")
+    print(auth)
+    # write the secret
+    with open(f"/boinc_project_secrets/submitter/{args.user}.txt", 'w') as out:
+        out.write(auth)

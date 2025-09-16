@@ -60,6 +60,8 @@ WORKDIR /boinc
 COPY --from=builder /boinc .
 COPY --from=builder /usr/local/lib/php/extensions /usr/local/lib/php/extensions
 COPY ./container_entry.sh .
+COPY ./container_tools ./container_tools
+ENV PATH="/boinc/container_tools:${PATH}"
 
 RUN echo "TOP_BUILD_DIR='/boinc/libexec/boinc-server-maker/'" > /boinc/share/boinc-server-maker/py/boinc_path_config.py
 
