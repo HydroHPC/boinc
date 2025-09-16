@@ -25,10 +25,10 @@ require_once("../inc/submit_db.inc");
 // Not stored in the DB;
 // it's computed by get_batch_params() and added to the workunit object
 //
-define('WU_UNSENT', 0);
-define('WU_IN_PROGRESS', 1);
-define('WU_SUCCESS', 2);
-define('WU_ERROR', 3);
+define('WU_UNSENT', 1);
+define('WU_IN_PROGRESS', 2);
+define('WU_SUCCESS', 3);
+define('WU_ERROR', 4);
 
 // write status and error messages to log
 //
@@ -220,6 +220,24 @@ function get_batch_params($batch, $wus) {
     $batch->njobs_success = $njobs_success;
     $batch->njobs_in_prog = $njobs_in_prog;
     return $batch;
+}
+
+// get params of in-progress batches; they might not be in progress anymore.
+//
+function get_batches_params($batches) {
+    $b = [];
+    foreach ($batches as $batch) {
+        if ($batch->state == BATCH_STATE_IN_PROGRESS) {
+            $wus = BoincWorkunit::enum_fields(
+                'id, name, rsc_fpops_est, canonical_credit, canonical_resultid, error_mask',
+                "batch = $batch->id"
+            );
+            $b[] = get_batch_params($batch, $wus);
+        } else {
+            $b[] = $batch;
+        }
+    }
+    return $b;
 }
 
 // get the physical names of a result's output files.

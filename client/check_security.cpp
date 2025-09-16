@@ -52,6 +52,12 @@ static int CheckNestedDirectories(
     int len
 );
 
+static int CheckPodmanDirContents(
+    char * basepath,
+    char * path_to_error,
+    int len
+);
+
 #if (! defined(__WXMAC__) && ! defined(_MAC_INSTALLER))
 #include "sandbox.h"
 
@@ -73,7 +79,8 @@ static uid_t        boinc_master_uid, boinc_project_uid;
 
 // Called from BOINC Manager, BOINC Client and Installer.
 
-// Returns FALSE (0) if owners and permissions are OK, else TRUE (1)
+// Returns noErr (0) if owners and permissions are OK, else a custom error code
+//TODO: resolve symbolic links and check their ownership and permissions
 int check_security(
 #ifdef _MAC_INSTALLER
 char *bundlePath, char *dataPath,   // These arguments are used only when called from the Installer
@@ -168,42 +175,70 @@ int use_sandbox, int isManager, char* path_to_error, int len
 
 #ifdef __APPLE__
     char DataDirPath[MAXPATHLEN];
+
 #ifdef _MAC_INSTALLER
     strlcpy(DataDirPath, dataPath, sizeof(dir_path));  // Installer
 #else
     getcwd(DataDirPath, sizeof(DataDirPath));
 #endif
+    if (use_sandbox) {
+       snprintf(full_path, sizeof(full_path),
+            "%s/%s", DataDirPath, FIX_BOINC_USERS_FILENAME
+        );
+        retval = stat(full_path, &sbuf);
+        if (retval)
+            return -1061;
+
+        if (sbuf.st_uid != 0)   // root
+             return -1062;
+
+        if (sbuf.st_gid != boinc_master_gid)
+            return -1063;
+
+        if ((sbuf.st_mode & 07777) != 04555)
+            return -1064;
+
+        if (! isMacInstaller) {
+        // MacOS updates often change the PrimaryGroupID of boinc_master and
+        // boinc_project to 20 (staff.)
+            if ((retval2 == -1301) || (retval2 == -1302)) {
+                snprintf(full_path, sizeof(full_path),
+                    "\"%s/%s\"", DataDirPath, FIX_BOINC_USERS_FILENAME
+                );
+                printf("Permissions error %d, calling %s\n", retval2, full_path);
+                callPosixSpawn(full_path);  // Try to fix it
+                retval2 = check_boinc_users_primarygroupIds(useFakeProjectUserAndGroup, isMacInstaller);
+            }
+        }
+        if (retval2)
+            return retval2;
+    }   // use_sandbox
+
     snprintf(full_path, sizeof(full_path),
-        "%s/%s", DataDirPath, FIX_BOINC_USERS_FILENAME
+        "%s/%s", DataDirPath, RUN_PODMAN_FILENAME
     );
     retval = stat(full_path, &sbuf);
     if (retval)
-    return -1061;
-
-    if (sbuf.st_uid != 0)   // root
-         return -1062;
+        return -1065;
 
     if (sbuf.st_gid != boinc_master_gid)
-        return -1063;
+        return -1066;
 
-    if ((sbuf.st_mode & 07777) != 04555)
-        return -1064;
+    if (use_sandbox) {
+        if (sbuf.st_uid != 0)   // root
+            return -1067;
 
-    if (! isMacInstaller) {
-    // MacOS updates often change the PrimaryGroupID of boinc_master and
-    // boinc_project to 20 (staff.)
-        if ((retval2 == -1301) || (retval2 == -1302)) {
-            snprintf(full_path, sizeof(full_path),
-                "\"%s/%s\"", DataDirPath, FIX_BOINC_USERS_FILENAME
-            );
-            printf("Permissions error %d, calling %s\n", retval2, full_path);
-            callPosixSpawn(full_path);  // Try to fix it
-            retval2 = check_boinc_users_primarygroupIds(useFakeProjectUserAndGroup, isMacInstaller);
-        }
+        if ((sbuf.st_mode & 07777) != 04555)
+            return -1068;
+    } else {
+        if (sbuf.st_uid != boinc_master_uid)
+            return -1067;
+
+        if ((sbuf.st_mode & 07777) != 0755)
+            return -1068;
     }
-    if (retval2)
-        return retval2;
-#endif
+
+#endif  // __APPLE__
 
 #if 0   // Manager is no longer setgid
 #if (defined(__WXMAC__) || defined(_MAC_INSTALLER)) // If Mac BOINC Manager or installer
@@ -331,7 +366,7 @@ int use_sandbox, int isManager, char* path_to_error, int len
             return -1022;
 
         // The top-level BOINC Data directory should have permission 771 or 571
-        if ((sbuf.st_mode & 0577) != 0571)
+        if ((sbuf.st_mode & 07577) != 0575)
             return -1023;
 
     } else {
@@ -350,7 +385,7 @@ int use_sandbox, int isManager, char* path_to_error, int len
             if (sbuf.st_gid != boinc_project_gid)
                 return -1024;
 
-        if ((sbuf.st_mode & 0777) != 0770)
+        if ((sbuf.st_mode & 07777) != 0770)
             return -1025;
         }
 
@@ -370,7 +405,7 @@ int use_sandbox, int isManager, char* path_to_error, int len
             if (sbuf.st_gid != boinc_project_gid)
                 return -1027;
 
-            if ((sbuf.st_mode & 0777) != 0770)
+            if ((sbuf.st_mode & 07777) != 0770)
                 return -1028;
         }
 
@@ -383,28 +418,30 @@ int use_sandbox, int isManager, char* path_to_error, int len
             return retval;
     }
 
-    // "BOINC Podman" Directory is in "/Library/Application/Support/"
-    // directory, alongside "BOINC Data" directory
-    snprintf(full_path, sizeof(full_path), "%s/../%s", dir_path, PODMAN_DIR);
-    retval = stat(full_path, &sbuf);
-    if (! retval) {                 // Client can create podman directory if it does not yet exist.
-       if (use_sandbox) {
-            if (sbuf.st_gid != boinc_project_gid)
-                return -1071;
+    if (use_sandbox) {
+        // "BOINC Podman" Directory is in "/Library/Application/Support/"
+        // directory, alongside "BOINC Data" directory
+        snprintf(full_path, sizeof(full_path), "%s/../%s", dir_path, PODMAN_DIR);
+        retval = stat(full_path, &sbuf);
+        if (retval)
+            return -1071;
 
-            if ((sbuf.st_mode & 0777) != 0770)
-                return -1072;
-        }
+        if (sbuf.st_gid != boinc_project_gid)
+            return -1072;
 
-        if (sbuf.st_uid != boinc_master_uid)
+        if ((sbuf.st_mode & 07777) != 0770)
             return -1073;
 
-        // We must not modify permissions of any of Podman's data, or
-        // change ownership of any of Podman's data from boinc_project,
-        // so we set them for the BOINC podman directory itself but not
-        // its contents.
+        if (sbuf.st_uid != boinc_master_uid)
+            return -1074;
+
+        // We must not modify permissions of any of Podman's data,
+        // so we set them for the BOINC podman directory itself
+        // but not its contents.
+        retval = CheckPodmanDirContents(full_path, path_to_error, len);
+        if (retval)
+            return retval;
     }
-//TODO: Should we confirm owner of all BOINC podman directory's contents is boinc_project?
 
     snprintf(full_path, sizeof(full_path),
         "%s/%s", dir_path, GUI_RPC_PASSWD_FILE
@@ -415,10 +452,10 @@ int use_sandbox, int isManager, char* path_to_error, int len
             if (sbuf.st_gid != boinc_master_gid)
                 return -1030;
 
-            if ((sbuf.st_mode & 0777) != 0660)
+            if ((sbuf.st_mode & 07777) != 0660)
                 return -1032;
         } else {
-            if ((sbuf.st_mode & 0717) != 0600)
+            if ((sbuf.st_mode & 07717) != 0600)
                 return -1032;
         }
 
@@ -438,7 +475,7 @@ int use_sandbox, int isManager, char* path_to_error, int len
         if (sbuf.st_uid != boinc_master_uid)
             return -1035;
 
-        if ((sbuf.st_mode & 0777) != 0550)
+        if ((sbuf.st_mode & 07777) != 0550)
             return -1036;
 
         strlcat(full_path, "/", sizeof(full_path));
@@ -503,7 +540,7 @@ int use_sandbox, int isManager, char* path_to_error, int len
             if (sbuf.st_gid != boinc_master_gid)
                 return -1052;
 
-            if ((sbuf.st_mode & 0777) != 0664)
+            if ((sbuf.st_mode & 07777) != 0664)
                 return -1053;
         }   // Screensaver config file ss_config.xml exists
 
@@ -676,14 +713,14 @@ static int CheckNestedDirectories(
                     if (depth == 1) {
                     // project & slot directories (projects/setiathome.berkeley.edu, slots/0 etc.)
                     // must be readable & executable by other
-                        if ((sbuf.st_mode & 0777) != 0775) {
+                        if ((sbuf.st_mode & 07777) != 0775) {
                             retval = -1203;
                             break;
                         }
 #if 0               // We may enforce permissions later for subdirectories written by project applications
                     } else {
                         // subdirectories created by projects may be executable by other or not
-                        if ((sbuf.st_mode & 0770) != 0770) {
+                        if ((sbuf.st_mode & 07777) != 0770) {
                             retval = -1203;
                             break;
                         }
@@ -691,7 +728,7 @@ static int CheckNestedDirectories(
                 }
 #if 0           // We may enforce permissions later for files written by project applications
                 } else {    // ! isDirectory
-                    if ((sbuf.st_mode & 0666) != 0660) {
+                    if ((sbuf.st_mode & 07666) != 0660) {
                         retval = -1204;
                         break;
                     }
@@ -713,7 +750,7 @@ static int CheckNestedDirectories(
                 break;
         }
 
-    }       // End while (true)
+    }       // End while (dirp)
 
     if (dirp) {
         closedir(dirp);
@@ -725,6 +762,80 @@ static int CheckNestedDirectories(
             strlcpy(path_to_error, full_path, len);
         }
         errShown = 1;
+    }
+    return retval;
+}
+
+
+static int CheckPodmanDirContents(
+    char * basepath,
+    char * path_to_error,
+    int len
+) {
+    int             isDirectory;
+    char            full_path[MAXPATHLEN];
+    struct stat     sbuf;
+    int             retval = 0;
+    DIR             *dirp;
+    dirent          *dp;
+    static int      errShown2 = 0;
+
+    dirp = opendir(basepath);
+    if (dirp == NULL) {
+        // Ideally, all project-created subdirectories under project or slot
+        // directoriesshould have read-by-group and execute-by-group permission
+        // bits set, but some don't.  If these permission bits are missing, the
+        // project applications will run OK but we can't access the contents of
+        // the subdirectory to check them.
+        strlcpy(full_path, basepath, sizeof(full_path));
+        if (errno == EACCES) {
+            return 0;
+        }
+    }
+
+    while (dirp) {              // Skip this if dirp == NULL, else loop until break
+        dp = readdir(dirp);
+        if (dp == NULL)
+            break;                  // End of list
+
+        if (dp->d_name[0] == '.')
+            continue;               // Ignore names beginning with '.'
+
+        snprintf(full_path, sizeof(full_path), "%s/%s", basepath, dp->d_name);
+        retval = lstat(full_path, &sbuf);
+        if (retval)
+            break;              // Should never happen
+
+        isDirectory = S_ISDIR(sbuf.st_mode);
+        if (!S_ISLNK(sbuf.st_mode)) {   // The system ignores ownership & permissions of symbolic links
+            if ( sbuf.st_uid != boinc_project_uid) {
+                retval = -1075;
+                break;
+            }
+
+            if (sbuf.st_gid != boinc_project_gid) {
+                retval = -1076;
+                break;
+            }
+
+            if (isDirectory && !S_ISLNK(sbuf.st_mode)) {
+                retval = CheckPodmanDirContents(full_path, path_to_error, len);
+                if (retval)
+                    break;
+            }
+        }
+    }       // End while (dirp)
+
+    if (dirp) {
+        closedir(dirp);
+    }
+
+    if (retval && !errShown2) {
+        fprintf(stderr, "Permissions error %d at %s\n", retval, full_path);
+        if (path_to_error) {
+            strlcpy(path_to_error, full_path, len);
+        }
+        errShown2 = 1;
     }
     return retval;
 }

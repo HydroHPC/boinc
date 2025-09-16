@@ -19,7 +19,7 @@ name: Linux
 on:
   push:
     branches: [ master, 'client_release/**' ]
-    tags: [ 'client_release/**', 'vboxwrapper/**', 'wrapper/**' ]
+    tags: [ 'client_release/**', 'vboxwrapper/**', 'wrapper/**', 'dockerwrapper/**', 'worker/**' ]
   pull_request:
     branches: [ master ]
   schedule:
@@ -43,7 +43,7 @@ jobs:
         type: [libs, client, apps, manager, libs-vcpkg, client-vcpkg, apps-vcpkg, libs-cmake, libs-arm64, apps-arm64, libs-vcpkg-arm64, apps-vcpkg-arm64, manager-with-webview-vcpkg, server, manager-with-webview, manager-without-webview, unit-test, integration-test]
       fail-fast: false
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         with:
           fetch-depth: 2
 
@@ -103,7 +103,7 @@ jobs:
           ./tests/integration_test/installTestSuite.sh
 
       - name: Cache dependencies
-        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809
         with:
           path: |
             3rdParty/buildCache
@@ -264,7 +264,7 @@ jobs:
 
       - name: Upload coverage report
         if: success() && matrix.type == 'unit-test'
-        uses: codecov/codecov-action@18283e04ce6e62d37312384ff67231eb8fd56d24
+        uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
@@ -307,7 +307,7 @@ jobs:
         run: |
           apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu wget ca-certificates
 
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         with:
           fetch-depth: 2
 

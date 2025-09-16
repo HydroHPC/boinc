@@ -56,7 +56,7 @@ jobs:
         type: [client, manager]
       fail-fast: false
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         with:
           fetch-depth: 2
       - name: Check if build is running from origin repo
@@ -78,6 +78,17 @@ jobs:
         run: |
           apt-get -qq update
           apt-get install -y autopoint make build-essential m4 pkg-config autoconf libtool git python3 python3-distutils python3-pip curl zip unzip tar bison p7zip-full libx11-dev libxft-dev libxext-dev libdbus-1-dev libxi-dev libxtst-dev libxrandr-dev libnotify-dev
+
+      - name: Install updated version of autoconf
+        run: |
+          curl https://ftp.gnu.org/gnu/autoconf/autoconf-2.70.tar.gz -o autoconf-2.70.tar.gz
+          tar -xzf autoconf-2.70.tar.gz
+          cd autoconf-2.70
+          ./configure --prefix=/usr
+          make -j $(nproc --all)
+          make install
+          cd ..
+          autoconf --version
 
       - name: Install aws cli tool
         run: |
@@ -135,13 +146,13 @@ jobs:
     needs: prepare-binaries
     strategy:
       matrix:
-        os: [focal, jammy, noble, buster, bullseye, bookworm]
+        os: [focal, jammy, noble, buster, bullseye, bookworm, trixie]
         type: [client, manager]
       fail-fast: false
     env:
       ARCH: amd64
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         if: success()
         with:
           fetch-depth: 2
@@ -172,7 +183,7 @@ jobs:
 
       - name: Download
         if: success()
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
         with:
           name: linux-package_${{ matrix.type }}_${{ github.event.pull_request.head.sha }}
           path: pkgs/
@@ -217,7 +228,7 @@ jobs:
           fakeroot dpkg-deb -Zxz --build "${{ github.workspace }}/${PKG_FULL}"
 
       - name: Create Debian Package
-        if: ${{ success() && ( matrix.os == 'buster' || matrix.os == 'bullseye' || matrix.os == 'bookworm' ) }}
+        if: ${{ success() && ( matrix.os == 'buster' || matrix.os == 'bullseye' || matrix.os == 'bookworm' || matrix.os == 'trixie' ) }}
         run: |
           cd ${{ github.workspace }}/
           # Build the actual package for Debian with GZIP compression
@@ -251,7 +262,7 @@ jobs:
       ARCH: x86_64
       PUBKEY_HASH: D4460B4F0EEDE2C0662092F640254C9B29853EA6
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         if: success()
         with:
           fetch-depth: 2
@@ -290,7 +301,7 @@ jobs:
 
       - name: Download
         if: success()
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
         with:
           name: linux-package_${{ matrix.type }}_${{ github.event.pull_request.head.sha }}
           path: pkgs/
@@ -623,11 +634,11 @@ jobs:
     needs: build-deb-package
     strategy:
       matrix:
-        os: [buster, bullseye, bookworm]
+        os: [buster, bullseye, bookworm, trixie]
         type: [install, upgrade, upgrade-from-alpha, upgrade-from-stable]
       fail-fast: false
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         with:
           fetch-depth: 2
 
@@ -649,7 +660,7 @@ jobs:
           mv /bin/systemctl /bin/systemctl.bak
 
       - name: Install distro package for further upgrade from the alpha
-        if: success() && matrix.type == 'upgrade-from-alpha'
+        if: success() && matrix.type == 'upgrade-from-alpha' && matrix.os != 'trixie'
         run: |
           mkdir -p /etc/apt/keyrings
           curl -fsSL https://boinc.berkeley.edu/dl/linux/alpha/${{ matrix.os }}/boinc.gpg | gpg --dearmor -o /etc/apt/keyrings/boinc.gpg
@@ -658,7 +669,7 @@ jobs:
           DEBIAN_FRONTEND=noninteractive apt install -y boinc-client boinc-manager
 
       - name: Install distro package for further upgrade from the stable
-        if: success() && matrix.type == 'upgrade-from-stable'
+        if: success() && matrix.type == 'upgrade-from-stable' && matrix.os != 'trixie'
         run: |
           mkdir -p /etc/apt/keyrings
           curl -fsSL https://boinc.berkeley.edu/dl/linux/stable/${{ matrix.os }}/boinc.gpg | gpg --dearmor -o /etc/apt/keyrings/boinc.gpg
@@ -668,13 +679,13 @@ jobs:
 
       - name: Download client
         if: success()
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
         with:
           name: linux-package_client_${{ matrix.os }}_${{ github.event.pull_request.head.sha }}
 
       - name: Download manager
         if: success()
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
         with:
           name: linux-package_manager_${{ matrix.os }}_${{ github.event.pull_request.head.sha }}
 
@@ -702,7 +713,7 @@ jobs:
         type: [install, upgrade, upgrade-from-ppa, upgrade-from-alpha, upgrade-from-stable]
       fail-fast: false
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         with:
           fetch-depth: 2
 
@@ -750,13 +761,13 @@ jobs:
 
       - name: Download client
         if: success()
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
         with:
           name: linux-package_client_${{ matrix.os }}_${{ github.event.pull_request.head.sha }}
 
       - name: Download manager
         if: success()
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
         with:
           name: linux-package_manager_${{ matrix.os }}_${{ github.event.pull_request.head.sha }}
 
@@ -784,7 +795,7 @@ jobs:
         type: [install, upgrade, upgrade-from-alpha, upgrade-from-stable]
       fail-fast: false
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         with:
           fetch-depth: 2
 
@@ -840,13 +851,13 @@ jobs:
 
       - name: Download client
         if: success()
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
         with:
           name: linux-package_client_fc${{ matrix.os }}_${{ github.event.pull_request.head.sha }}
 
       - name: Download manager
         if: success()
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
         with:
           name: linux-package_manager_fc${{ matrix.os }}_${{ github.event.pull_request.head.sha }}
 
@@ -884,7 +895,7 @@ jobs:
         run: |
           zypper install -y python3 tar gzip
 
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         with:
           fetch-depth: 2
 
@@ -914,13 +925,13 @@ jobs:
 
       - name: Download client
         if: success()
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
         with:
           name: linux-package_client_suse${{ env.OS }}_${{ github.event.pull_request.head.sha }}
 
       - name: Download manager
         if: success()
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
         with:
           name: linux-package_manager_suse${{ env.OS }}_${{ github.event.pull_request.head.sha }}
 
@@ -942,7 +953,7 @@ jobs:
     needs: [test-debian-deb-package, test-ubuntu-deb-package]
     strategy:
       matrix:
-        os: [focal, jammy, noble, buster, bullseye, bookworm]
+        os: [focal, jammy, noble, buster, bullseye, bookworm, trixie]
       fail-fast: false
     steps:
       - name: Check if build is running from origin repo
@@ -955,7 +966,7 @@ jobs:
         run: |
           echo "SKIP_RUN=1" >> $GITHUB_ENV
 
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         if: ${{ success() && env.SKIP_RUN == 0 }}
         with:
           fetch-depth: 2
@@ -975,13 +986,13 @@ jobs:
 
       - name: Download client
         if: ${{ success() && env.SKIP_RUN == 0 }}
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
         with:
           name: linux-package_client_${{ matrix.os }}_${{ github.event.pull_request.head.sha }}
 
       - name: Download manager
         if: ${{ success() && env.SKIP_RUN == 0 }}
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
         with:
           name: linux-package_manager_${{ matrix.os }}_${{ github.event.pull_request.head.sha }}
 
@@ -1047,7 +1058,7 @@ jobs:
         run: |
           echo "SKIP_RUN=1" >> $GITHUB_ENV
 
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         if: ${{ success() && env.SKIP_RUN == 0 }}
         with:
           fetch-depth: 2
@@ -1074,13 +1085,13 @@ jobs:
 
       - name: Download client
         if: ${{ success() && env.SKIP_RUN == 0 }}
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
         with:
           name: linux-package_client_${{ matrix.os }}_${{ github.event.pull_request.head.sha }}
 
       - name: Download manager
         if: ${{ success() && env.SKIP_RUN == 0 }}
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
         with:
           name: linux-package_manager_${{ matrix.os }}_${{ github.event.pull_request.head.sha }}
 

@@ -21,21 +21,44 @@
 //
 // A 'remote app' is one where jobs are submitted remotely:
 // - via web RPCs
-// - (and possibly also) via forms on the project web site
+// - via forms on the project web site
 //
 // In both cases only users with permission can submit; either
 // - a user_submit record with submit_all set
 // - a user_submit_app record
 //
-// They are apps are described in $remote_apps in project.inc
+// These apps are described in $remote_apps in project.inc
 //
-// This page has several functions:
-// - links to app-specific job-submission pages
-// - Admin (if privileged user)
-// - manage batches
-//      view status, get output files, abort, retire
-//   (this also shows batches created on the server)
-// - set 'use only my computers'
+// This page provides several functions involving remote apps
+// ('me' means logged-in user)
+//
+//  show_all_batches
+//      show list of batches visible to me, possibly filtered by
+//          submitting user
+//          app
+//          state (in progress, completed etc.)
+//  show_user_batches
+//      show my batches
+//  show_batches_admin_app
+//      show all batches for a given app to admin
+//  admin_all
+//      show all batches to admin
+//  batch_stats
+//      show WSS, disk usage stats for a batch
+//  query_batch
+//      show list of jobs in a batch
+//  query_job
+//      show job details and instances
+//  retire_batch
+//      retire a batch
+//  retire_multi
+//      retire multiple batches
+//  abort_batch
+//      abort a batch
+//  admin
+//      show index of admin functions
+//  update_only_own
+//      control whether my jobs should run only on my computers
 
 require_once("../inc/submit_db.inc");
 require_once("../inc/util.inc");
@@ -131,24 +154,6 @@ function get_order() {
     $order = get_str('order', true);
     if (!$order) $order = 'sub_desc';
     return $order;
-}
-
-// get params of in-progress batches; they might not be in progress anymore.
-//
-function get_batches_params($batches) {
-    $b = [];
-    foreach ($batches as $batch) {
-        if ($batch->state == BATCH_STATE_IN_PROGRESS) {
-            $wus = BoincWorkunit::enum_fields(
-                'id, name, rsc_fpops_est, canonical_credit, canonical_resultid, error_mask',
-                "batch = $batch->id"
-            );
-            $b[] = get_batch_params($batch, $wus);
-        } else {
-            $b[] = $batch;
-        }
-    }
-    return $b;
 }
 
 function state_count($batches, $state) {
@@ -399,11 +404,10 @@ function show_submit_links($user) {
 // They have manage access to these batches.
 //
 function handle_show_user_batches($user) {
-    page_head("Batches");
+    page_head("Your batches");
     $order = get_order();
     order_options('action=show_user_batches', $order);
     $batches = BoincBatch::enum("user_id = $user->id");
-    get_batches_params($batches);
     show_batches($batches, $order, PAGE_SIZE, $user, null);
 
     page_tail();
@@ -503,7 +507,7 @@ function show_batches_admin_app($user) {
 
 function handle_admin_all($user) {
     $order = get_order();
-    page_head("Administer batches (all apps)");
+    page_head("Administer batches (all apps and users)");
     order_options("action=admin_all", $order);
     $batches = BoincBatch::enum('');
     show_batches($batches, $order, PAGE_SIZE, null, null);
@@ -619,6 +623,7 @@ function progress_bar($batch, $wus, $width) {
 //
 function handle_query_batch($user) {
     $batch_id = get_int('batch_id');
+    $status = get_int('status', true);
     $batch = BoincBatch::lookup_id($batch_id);
     $app = BoincApp::lookup_id($batch->app_id);
     $wus = BoincWorkunit::enum_fields(
@@ -653,7 +658,7 @@ function handle_query_batch($user) {
         row2("expiration time", time_str($batch->expire_time));
     }
     if ($batch->njobs) {
-        row2("progress", progress_bar($batch, $wus, 600));
+        row2('progress', progress_bar($batch, $wus, 600));
     }
     if ($batch->completion_time) {
         row2("completed", local_time_str($batch->completion_time));
@@ -711,6 +716,22 @@ function handle_query_batch($user) {
     ";
 
     echo "<h2>Jobs</h2>\n";
+    $url = "submit.php?action=query_batch&batch_id=$batch_id";
+    echo "Show: ";
+    echo sprintf('
+        <a href=%s&status=%d>failed</a> &middot;
+        <a href=%s&status=%d>completed</a> &middot;
+        <a href=%s&status=%d>in progress</a> &middot;
+        <a href=%s&status=%d>unsent</a> &middot;
+        <a href=%s>all</a>
+        <p>',
+        $url, WU_ERROR,
+        $url, WU_SUCCESS,
+        $url, WU_IN_PROGRESS,
+        $url, WU_UNSENT,
+        $url
+    );
+
     start_table();
     $x = [
         "Name <br><small>click for details</small>",
@@ -719,6 +740,7 @@ function handle_query_batch($user) {
     ];
     row_heading_array($x);
     foreach($wus as $wu) {
+        if ($status && $wu->status != $status) continue;
         $y = '';
         $c = '---';
         switch($wu->status) {
